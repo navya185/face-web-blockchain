@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import cv2
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -40,6 +41,10 @@ if "target_embedding" not in st.session_state:
     st.session_state.target_embedding = None
 if "face_box" not in st.session_state:
     st.session_state.face_box = None
+if "annotated_image" not in st.session_state:
+    st.session_state.annotated_image = None
+if "face_crop" not in st.session_state:
+    st.session_state.face_crop = None
 if "search_results" not in st.session_state:
     st.session_state.search_results = []
 if "selected_result" not in st.session_state:
@@ -74,22 +79,36 @@ col1, col2 = st.columns(2)
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
     with col1:
-        st.image(image, caption="Uploaded Input Face Image", use_container_width=True)
+        if st.session_state.annotated_image is not None:
+            st.image(st.session_state.annotated_image, caption="Detected Face (Bounding Box)", use_container_width=True)
+        else:
+            st.image(image, caption="Uploaded Input Face Image", use_container_width=True)
 
     if st.button("🔍 2. Identify Face"):
         with st.spinner("Detecting face and computing 128-d encoding..."):
             try:
-                emb, box = st.session_state.embedder.encode_face(image, require_single_face=True)
+                emb, box = st.session_state.embedder.encode_face(image, require_single_face=False)
                 st.session_state.target_embedding = emb
                 st.session_state.face_box = box
-                st.success(f"✅ Single Face Detected successfully! Bounding Box: {box}")
+                
+                # Generate visual bounding box overlay & crop
+                annotated_bgr = st.session_state.embedder.detector.draw_face_boxes(image, [box])
+                st.session_state.annotated_image = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
+                
+                crop_bgr = st.session_state.embedder.detector.extract_face_crop(image, box)
+                st.session_state.face_crop = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+
+                st.success(f"✅ Face Detected successfully! Bounding Box: {box}")
+                st.rerun()
             except FaceProcessingError as e:
                 st.error(f"❌ Face Identification Error: {e}")
 
 if st.session_state.target_embedding is not None:
     with col2:
-        st.subheader("Face Embedding Features (Sample)")
-        st.code(f"Vector Shape: {st.session_state.target_embedding.shape}\nSample: {st.session_state.target_embedding[:10].round(4)}")
+        st.subheader("Extracted Face Crop & Feature Vector")
+        if st.session_state.face_crop is not None:
+            st.image(st.session_state.face_crop, caption="Normalized 128x128 Face Crop", width=150)
+        st.code(f"Embedding Vector Shape: {st.session_state.target_embedding.shape}\nSample Vector[:10]: {st.session_state.target_embedding[:10].round(4)}")
         st.warning("⚠️ Disclaimer: Face recognition is probabilistic and not 100% accurate.")
 
 # ---------------------------------------------------------
